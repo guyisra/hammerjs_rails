@@ -1,6 +1,6 @@
 # HammerjsRails
 
-TODO: Write a gem description
+Hammer.js for Ruby on Rails
 
 ## Installation
 
@@ -20,9 +20,9 @@ Or install it yourself as:
 
 add to manifest (application.js)
 
-//= require hammer
+    //= require hammer
 
-and then RTFH (get it?) on https://github.com/EightMedia/hammer.js
+and then lay down the hammer on https://github.com/EightMedia/hammer.js
 
 ## Contributing
 
