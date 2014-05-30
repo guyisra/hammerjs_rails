@@ -1,9 +1,8 @@
-/*! Hammer.JS - v1.1.3 - 2014-05-22
- * http://eightmedia.github.io/hammer.js
+/*! jQuery plugin for Hammer.JS - v1.1.3 - 2014-05-20
+ * http://eightmedia.github.com/hammer.js
  *
  * Copyright (c) 2014 Jorik Tangelder <j.tangelder@gmail.com>;
  * Licensed under the MIT license */
-
 (function(window, undefined) {
   'use strict';
 
@@ -620,6 +619,181 @@ var Utils = Hammer.utils = {
 /**
  * @module hammer
  */
+
+/**
+ * create new hammer instance
+ * all methods should return the instance itself, so it is chainable.
+ *
+ * @class Instance
+ * @constructor
+ * @param {HTMLElement} element
+ * @param {Object} [options={}] options are merged with `Hammer.defaults`
+ * @return {Hammer.Instance}
+ */
+Hammer.Instance = function(element, options) {
+    var self = this;
+
+    // setup HammerJS window events and register all gestures
+    // this also sets up the default options
+    setup();
+
+    /**
+     * @property element
+     * @type {HTMLElement}
+     */
+    this.element = element;
+
+    /**
+     * @property enabled
+     * @type {Boolean}
+     * @protected
+     */
+    this.enabled = true;
+
+    /**
+     * options, merged with the defaults
+     * options with an _ are converted to camelCase
+     * @property options
+     * @type {Object}
+     */
+    Utils.each(options, function(value, name) {
+        delete options[name];
+        options[Utils.toCamelCase(name)] = value;
+    });
+
+    this.options = Utils.extend(Utils.extend({}, Hammer.defaults), options || {});
+
+    // add some css to the element to prevent the browser from doing its native behavoir
+    if(this.options.behavior) {
+        Utils.toggleBehavior(this.element, this.options.behavior, true);
+    }
+
+    /**
+     * event start handler on the element to start the detection
+     * @property eventStartHandler
+     * @type {Object}
+     */
+    this.eventStartHandler = Event.onTouch(element, EVENT_START, function(ev) {
+        if(self.enabled && ev.eventType == EVENT_START) {
+            Detection.startDetect(self, ev);
+        } else if(ev.eventType == EVENT_TOUCH) {
+            Detection.detect(ev);
+        }
+    });
+
+    /**
+     * keep a list of user event handlers which needs to be removed when calling 'dispose'
+     * @property eventHandlers
+     * @type {Array}
+     */
+    this.eventHandlers = [];
+};
+
+Hammer.Instance.prototype = {
+    /**
+     * bind events to the instance
+     * @method on
+     * @chainable
+     * @param {String} gestures multiple gestures by splitting with a space
+     * @param {Function} handler
+     * @param {Object} handler.ev event object
+     */
+    on: function onEvent(gestures, handler) {
+        var self = this;
+        Event.on(self.element, gestures, handler, function(type) {
+            self.eventHandlers.push({ gesture: type, handler: handler });
+        });
+        return self;
+    },
+
+    /**
+     * unbind events to the instance
+     * @method off
+     * @chainable
+     * @param {String} gestures
+     * @param {Function} handler
+     */
+    off: function offEvent(gestures, handler) {
+        var self = this;
+
+        Event.off(self.element, gestures, handler, function(type) {
+            var index = Utils.inArray({ gesture: type, handler: handler });
+            if(index !== false) {
+                self.eventHandlers.splice(index, 1);
+            }
+        });
+        return self;
+    },
+
+    /**
+     * trigger gesture event
+     * @method trigger
+     * @chainable
+     * @param {String} gesture
+     * @param {Object} [eventData]
+     */
+    trigger: function triggerEvent(gesture, eventData) {
+        // optional
+        if(!eventData) {
+            eventData = {};
+        }
+
+        // create DOM event
+        var event = Hammer.DOCUMENT.createEvent('Event');
+        event.initEvent(gesture, true, true);
+        event.gesture = eventData;
+
+        // trigger on the target if it is in the instance element,
+        // this is for event delegation tricks
+        var element = this.element;
+        if(Utils.hasParent(eventData.target, element)) {
+            element = eventData.target;
+        }
+
+        element.dispatchEvent(event);
+        return this;
+    },
+
+    /**
+     * enable of disable hammer.js detection
+     * @method enable
+     * @chainable
+     * @param {Boolean} state
+     */
+    enable: function enable(state) {
+        this.enabled = state;
+        return this;
+    },
+
+    /**
+     * dispose this hammer instance
+     * @method dispose
+     * @return {Null}
+     */
+    dispose: function dispose() {
+        var i, eh;
+
+        // undo all changes made by stop_browser_behavior
+        Utils.toggleBehavior(this.element, this.options.behavior, false);
+
+        // unbind all custom event handlers
+        for(i = -1; (eh = this.eventHandlers[++i]);) {
+            Utils.off(this.element, eh.gesture, eh.handler);
+        }
+
+        this.eventHandlers = [];
+
+        // unbind the start event listener
+        Event.off(this.element, EVENT_TYPES[EVENT_START], this.eventStartHandler);
+
+        return null;
+    }
+};
+
+
+/**
+ * @module hammer
+ */
 /**
  * @class Event
  * @static
@@ -980,7 +1154,6 @@ var PointerEvent = Hammer.PointerEvent = {
         Utils.each(this.pointers, function(pointer) {
             touchlist.push(pointer);
         });
-
         return touchlist;
     },
 
@@ -991,7 +1164,7 @@ var PointerEvent = Hammer.PointerEvent = {
      * @param {Object} pointerEvent
      */
     updatePointer: function updatePointer(eventType, pointerEvent) {
-        if(eventType == EVENT_END) {
+        if(eventType == EVENT_END || (eventType != EVENT_END && pointerEvent.buttons !== 1)) {
             delete this.pointers[pointerEvent.pointerId];
         } else {
             pointerEvent.identifier = pointerEvent.pointerId;
@@ -1252,181 +1425,6 @@ var Detection = Hammer.detection = {
         });
 
         return this.gestures;
-    }
-};
-
-
-/**
- * @module hammer
- */
-
-/**
- * create new hammer instance
- * all methods should return the instance itself, so it is chainable.
- *
- * @class Instance
- * @constructor
- * @param {HTMLElement} element
- * @param {Object} [options={}] options are merged with `Hammer.defaults`
- * @return {Hammer.Instance}
- */
-Hammer.Instance = function(element, options) {
-    var self = this;
-
-    // setup HammerJS window events and register all gestures
-    // this also sets up the default options
-    setup();
-
-    /**
-     * @property element
-     * @type {HTMLElement}
-     */
-    this.element = element;
-
-    /**
-     * @property enabled
-     * @type {Boolean}
-     * @protected
-     */
-    this.enabled = true;
-
-    /**
-     * options, merged with the defaults
-     * options with an _ are converted to camelCase
-     * @property options
-     * @type {Object}
-     */
-    Utils.each(options, function(value, name) {
-        delete options[name];
-        options[Utils.toCamelCase(name)] = value;
-    });
-
-    this.options = Utils.extend(Utils.extend({}, Hammer.defaults), options || {});
-
-    // add some css to the element to prevent the browser from doing its native behavoir
-    if(this.options.behavior) {
-        Utils.toggleBehavior(this.element, this.options.behavior, true);
-    }
-
-    /**
-     * event start handler on the element to start the detection
-     * @property eventStartHandler
-     * @type {Object}
-     */
-    this.eventStartHandler = Event.onTouch(element, EVENT_START, function(ev) {
-        if(self.enabled && ev.eventType == EVENT_START) {
-            Detection.startDetect(self, ev);
-        } else if(ev.eventType == EVENT_TOUCH) {
-            Detection.detect(ev);
-        }
-    });
-
-    /**
-     * keep a list of user event handlers which needs to be removed when calling 'dispose'
-     * @property eventHandlers
-     * @type {Array}
-     */
-    this.eventHandlers = [];
-};
-
-Hammer.Instance.prototype = {
-    /**
-     * bind events to the instance
-     * @method on
-     * @chainable
-     * @param {String} gestures multiple gestures by splitting with a space
-     * @param {Function} handler
-     * @param {Object} handler.ev event object
-     */
-    on: function onEvent(gestures, handler) {
-        var self = this;
-        Event.on(self.element, gestures, handler, function(type) {
-            self.eventHandlers.push({ gesture: type, handler: handler });
-        });
-        return self;
-    },
-
-    /**
-     * unbind events to the instance
-     * @method off
-     * @chainable
-     * @param {String} gestures
-     * @param {Function} handler
-     */
-    off: function offEvent(gestures, handler) {
-        var self = this;
-
-        Event.off(self.element, gestures, handler, function(type) {
-            var index = Utils.inArray({ gesture: type, handler: handler });
-            if(index !== false) {
-                self.eventHandlers.splice(index, 1);
-            }
-        });
-        return self;
-    },
-
-    /**
-     * trigger gesture event
-     * @method trigger
-     * @chainable
-     * @param {String} gesture
-     * @param {Object} [eventData]
-     */
-    trigger: function triggerEvent(gesture, eventData) {
-        // optional
-        if(!eventData) {
-            eventData = {};
-        }
-
-        // create DOM event
-        var event = Hammer.DOCUMENT.createEvent('Event');
-        event.initEvent(gesture, true, true);
-        event.gesture = eventData;
-
-        // trigger on the target if it is in the instance element,
-        // this is for event delegation tricks
-        var element = this.element;
-        if(Utils.hasParent(eventData.target, element)) {
-            element = eventData.target;
-        }
-
-        element.dispatchEvent(event);
-        return this;
-    },
-
-    /**
-     * enable of disable hammer.js detection
-     * @method enable
-     * @chainable
-     * @param {Boolean} state
-     */
-    enable: function enable(state) {
-        this.enabled = state;
-        return this;
-    },
-
-    /**
-     * dispose this hammer instance
-     * @method dispose
-     * @return {Null}
-     */
-    dispose: function dispose() {
-        var i, eh;
-
-        // undo all changes made by stop_browser_behavior
-        Utils.toggleBehavior(this.element, this.options.behavior, false);
-
-        // unbind all custom event handlers
-        for(i = -1; (eh = this.eventHandlers[++i]);) {
-            Utils.off(this.element, eh.gesture, eh.handler);
-        }
-
-        this.eventHandlers = [];
-
-        // unbind the start event listener
-        Event.off(this.element, EVENT_TYPES[EVENT_START], this.eventStartHandler);
-
-        return null;
     }
 };
 
@@ -2143,21 +2141,91 @@ Hammer.gestures.Touch = {
     };
 })('transform');
 
-/**
- * @module hammer
- */
+window.Hammer = Hammer;
 
-// AMD export
-if(typeof define == 'function' && define.amd) {
-    define(function() {
-        return Hammer;
-    });
-// commonjs export
-} else if(typeof module !== 'undefined' && module.exports) {
+if(typeof module !== 'undefined' && module.exports) {
     module.exports = Hammer;
-// browser export
+}
+
+function setupPlugin(Hammer, $) {
+    // provide polyfill for Date.now()
+    // browser support: http://kangax.github.io/es5-compat-table/#Date.now
+    if(!Date.now) {
+        Date.now = function now() {
+            return new Date().getTime();
+        };
+    }
+
+    /**
+     * the methods on/off are called by the instance, but with the jquery plugin
+     * we use the jquery event methods instead.
+     * @this    {Hammer.Instance}
+     * @return  {jQuery}
+     */
+    Hammer.utils.each(['on', 'off'], function(method) {
+        Hammer.utils[method] = function(element, type, handler) {
+            $(element)[method](type, function($ev) {
+                // append the jquery fixed properties/methods
+                var data = $.extend({}, $ev.originalEvent, $ev);
+                if(data.button === undefined) {
+                    data.button = $ev.which - 1;
+                }
+                handler.call(this, data);
+            });
+        };
+    });
+
+    /**
+     * trigger events
+     * this is called by the gestures to trigger an event like 'tap'
+     * @this    {Hammer.Instance}
+     * @param   {String}    gesture
+     * @param   {Object}    eventData
+     * @return  {jQuery}
+     */
+    Hammer.Instance.prototype.trigger = function(gesture, eventData) {
+        var el = $(this.element);
+        if(el.has(eventData.target).length) {
+            el = $(eventData.target);
+        }
+
+        return el.trigger({
+            type: gesture,
+            gesture: eventData
+        });
+    };
+
+    /**
+     * jQuery plugin
+     * create instance of Hammer and watch for gestures,
+     * and when called again you can change the options
+     * @param   {Object}    [options={}]
+     * @return  {jQuery}
+     */
+    $.fn.hammer = function(options) {
+        return this.each(function() {
+            var el = $(this);
+            var inst = el.data('hammer');
+
+            // start new hammer instance
+            if(!inst) {
+                el.data('hammer', new Hammer(this, options || {}));
+                // change the options
+            } else if(inst && options) {
+                Hammer.utils.extend(inst.options, options);
+            }
+        });
+    };
+}
+
+
+// AMD
+if(typeof define == 'function' && define.amd) {
+    define(['jquery'], function($) {
+        return setupPlugin(window.Hammer, $);
+    });
 } else {
-    window.Hammer = Hammer;
+    setupPlugin(window.Hammer, window.jQuery || window.Zepto);
 }
 
 })(window);
